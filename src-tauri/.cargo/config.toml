@@ -1,0 +1,19 @@
+[target.aarch64-linux-android]
+ar = "llvm-ar"
+linker = "aarch64-linux-android24-clang"
+rustflags = ["-C", "link-arg=-Wl,--gc-sections"]
+
+[target.armv7-linux-androideabi]
+ar = "llvm-ar"
+linker = "armv7a-linux-androideabi24-clang"
+rustflags = ["-C", "target-feature=+neon", "-C", "link-arg=-Wl,--gc-sections"]
+
+[target.x86_64-linux-android]
+ar = "llvm-ar"
+linker = "x86_64-linux-android24-clang"
+rustflags = ["-C", "link-arg=-Wl,--gc-sections"]
+
+[target.i686-linux-android]
+ar = "llvm-ar"
+linker = "i686-linux-android24-clang"
+rustflags = ["-C", "link-arg=-Wl,--gc-sections"]

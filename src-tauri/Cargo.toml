@@ -1,0 +1,30 @@
+[package]
+name = "grid-run"
+version = "0.1.0"
+description = "Grid Run - High-performance spatial puzzle game by Kria Games"
+authors = ["Kria Games"]
+edition = "2021"
+
+[lib]
+name = "grid_run_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
+log = "0.4"
+thiserror = "1.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+

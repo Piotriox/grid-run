@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Grid Run</title>
+  <link rel="icon" type="image/png" href="gridrun.png" />
+  <link rel="apple-touch-icon" href="gridrun.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- Splash Screen & Loading Flow -->
+  <div id="splash-screen" class="splash-screen">
+    <!-- Phase 1: Kria Games Logo -->
+    <div id="splash-phase-logo" class="splash-phase">
+      <img id="kria-logo-img" src="Kria-Games.png" alt="Kria Games" class="kria-splash-logo" />
+    </div>
+
+    <!-- Phase 2: Fullscreen Loading Screen with gridrun-loading.png + Elevated Loading Bar -->
+    <div id="splash-phase-loading" class="splash-phase hidden">
+      <img src="gridrun-loading.png" alt="Grid Run" class="splash-loading-bg" />
+      <div class="splash-loader-bar-container">
+        <div class="splash-loader-bar">
+          <div id="splash-loader-progress" class="splash-loader-progress"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Unified Menu Overlay (Solid background, completely eliminates any background glitch) -->
+  <div id="menu-overlay" class="menu-overlay hidden">
+    <!-- View 1: Main Menu -->
+    <div id="menu-view-main" class="menu-view active">
+      <div class="menu-content">
+        <div class="menu-brand">
+          <h1 class="menu-title">Grid Run</h1>
+          <p class="menu-subtitle">Spatial Puzzle</p>
+        </div>
+
+        <div class="menu-card-container">
+          <!-- Highest Score Box -->
+          <div class="menu-stat-box">
+            <span class="menu-stat-label">HIGHEST SCORE</span>
+            <span id="menu-high-score-val" class="menu-stat-val">0</span>
+          </div>
+
+          <!-- Play Button -->
+          <button id="btn-menu-play" class="menu-play-btn" aria-label="Play Game">
+            <span>Play</span>
+          </button>
+
+          <!-- Settings Button -->
+          <button id="btn-menu-settings" class="menu-settings-btn" aria-label="Settings">
+            <span>Settings</span>
+          </button>
+        </div>
+
+        <div class="menu-footer">
+          <span>by Kria Games</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- View 2: Settings View with 10-step Stepped Audio Sliders -->
+    <div id="menu-view-settings" class="menu-view">
+      <div class="menu-content settings-content">
+        <div class="menu-brand">
+          <h1 class="menu-title">Settings</h1>
+          <p class="menu-subtitle">Audio Preferences</p>
+        </div>
+
+        <div class="settings-body">
+          <!-- Music Volume Setting (10 discrete steps) -->
+          <div class="setting-card">
+            <div class="setting-header">
+              <div class="setting-title-wrap">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18V5l12-2v13"></path>
+                  <circle cx="6" cy="18" r="3"></circle>
+                  <circle cx="18" cy="16" r="3"></circle>
+                </svg>
+                <span class="setting-name">Music</span>
+              </div>
+              <span id="music-vol-val" class="setting-level-pill">8</span>
+            </div>
+            <div class="slider-wrapper">
+              <input type="range" id="slider-music" min="0" max="10" step="1" value="8" class="step-slider" />
+              <div class="slider-step-dots">
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Effect Volume Setting (10 discrete steps) -->
+          <div class="setting-card">
+            <div class="setting-header">
+              <div class="setting-title-wrap">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>
+                <span class="setting-name">Effects</span>
+              </div>
+              <span id="sfx-vol-val" class="setting-level-pill">8</span>
+            </div>
+            <div class="slider-wrapper">
+              <input type="range" id="slider-sfx" min="0" max="10" step="1" value="8" class="step-slider" />
+              <div class="slider-step-dots">
+                <span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="menu-card-container">
+          <button id="btn-settings-back" class="menu-play-btn secondary" aria-label="Back to Main Menu">
+            <span>Back</span>
+          </button>
+        </div>
+
+        <div class="menu-footer">
+          <span>by Kria Games</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game Container -->
+  <div id="app" class="game-container">
+    <!-- Floating Drag Canvas for smooth piece dragging anywhere on screen -->
+    <canvas id="drag-canvas" class="drag-canvas"></canvas>
+
+    <!-- Floating FX Container for flying score energy orbs and score popups -->
+    <div id="fx-overlay-container" class="fx-overlay-container"></div>
+
+    <!-- Top Navigation Bar (Back Arrow on left, Bigger Grid Run center, Bigger Best on right) -->
+    <header class="top-nav-header">
+      <div class="header-left">
+        <button id="btn-back-menu" class="header-back-btn" title="Back to Main Menu" aria-label="Back to Main Menu">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+        <button id="btn-restart-nav" class="header-restart-btn" title="Restart Game" aria-label="Restart Game">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+            <path d="M3 3v5h5"></path>
+            <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+            <path d="M16 21h5v-5"></path>
+          </svg>
+        </button>
+      </div>
+
+      <div class="header-center-brand">
+        <svg class="brand-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
+          <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
+          <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
+          <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
+        </svg>
+        <span class="grid-run-title">Grid Run</span>
+      </div>
+
+      <div class="header-right">
+        <div class="best-score-badge">
+          <span class="best-badge-label">BEST</span>
+          <span id="high-score" class="best-badge-value">0</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Score Display Directly on Top of the Grid -->
+    <div class="grid-score-hero">
+      <div class="hero-score-wrapper">
+        <span class="hero-score-label">SCORE</span>
+        <span id="current-score" class="hero-score-value">0</span>
+      </div>
+      <div id="combo-badge" class="combo-badge hidden">COMBO x<span id="combo-count">1</span></div>
+    </div>
+
+    <!-- Main Game Canvas Container with Depth Effects -->
+    <main class="grid-section">
+      <div id="board-container" class="board-wrapper">
+        <canvas id="game-canvas"></canvas>
+        <canvas id="fx-canvas"></canvas>
+      </div>
+    </main>
+
+    <!-- 3-Piece Tray with Enhanced Physical Tray Depth -->
+    <section class="tray-section">
+      <div class="tray-container" id="tray-container">
+        <div class="piece-slot" data-slot="0"><canvas id="slot-canvas-0"></canvas></div>
+        <div class="piece-slot" data-slot="1"><canvas id="slot-canvas-1"></canvas></div>
+        <div class="piece-slot" data-slot="2"><canvas id="slot-canvas-2"></canvas></div>
+      </div>
+    </section>
+
+    <!-- Game Over Modal -->
+    <div id="modal-gameover" class="modal-backdrop hidden">
+      <div class="modal-dialog">
+        <h2 class="modal-title">NO MOVES LEFT</h2>
+        <div class="gameover-stats">
+          <div class="final-score-box">
+            <span class="label">FINAL SCORE</span>
+            <span id="go-score" class="val">0</span>
+          </div>
+          <div class="final-score-box">
+            <span class="label">HIGH SCORE</span>
+            <span id="go-high" class="val">0</span>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button id="btn-restart" class="action-btn primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+              <path d="M3 3v5h5"></path>
+              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
+              <path d="M16 21h5v-5"></path>
+            </svg>
+            <span>PLAY AGAIN</span>
+          </button>
+          <button id="btn-menu-from-go" class="action-btn secondary">
+            <span>MAIN MENU</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
