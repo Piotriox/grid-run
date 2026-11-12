@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capability for BlockPop",
+  "description": "Default capability for Grid Run",
   "windows": ["main"],
   "permissions": [
     "core:default",

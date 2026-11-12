@@ -1,5 +1,5 @@
 use crate::bitboard::{Bitboard, COL_MASKS, ROW_MASKS};
-use crate::piece::{generate_new_tray, TraySlot};
+use crate::piece::{generate_smart_tray, TraySlot};
 use rand::thread_rng;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -56,7 +56,7 @@ impl GameState {
     pub fn new(high_score: u32) -> Self {
         let mut rng = thread_rng();
         let board = Bitboard::empty();
-        let tray = generate_new_tray(&mut rng);
+        let tray = generate_smart_tray(board, &mut rng);
         let grid_array = board.to_grid_array();
 
         Self {
@@ -118,8 +118,8 @@ impl GameState {
         self.board.place(piece_mask);
         self.tray[slot_index].piece = None;
 
-        // Base score: 1 point per block
-        let mut score_delta = piece.cells.len() as u32;
+        // Base score: 10 points per block (10x scaling)
+        let mut score_delta = (piece.cells.len() as u32) * 10;
 
         // Check for completed rows & columns
         let (cleaned_board, cleared_rows_count, cleared_cols_count, cleared_mask) =
@@ -143,8 +143,8 @@ impl GameState {
             }
 
             self.combo_count += 1;
-            // Line clear score formula: 10 * N * (N + 1) / 2 * combo multiplier
-            let line_points = 10 * (total_lines * (total_lines + 1) / 2) * self.combo_count;
+            // Line clear score formula (10x scaling): 100 * N * (N + 1) / 2 * combo multiplier
+            let line_points = 100 * (total_lines * (total_lines + 1) / 2) * self.combo_count;
             score_delta += line_points;
             self.board = cleaned_board;
         } else {
@@ -164,7 +164,7 @@ impl GameState {
         let tray_empty = self.tray.iter().all(|s| s.piece.is_none());
         if tray_empty {
             let mut rng = thread_rng();
-            self.tray = generate_new_tray(&mut rng);
+            self.tray = generate_smart_tray(self.board, &mut rng);
             new_tray_spawned = true;
         }
 

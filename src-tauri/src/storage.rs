@@ -13,7 +13,10 @@ impl StorageManager {
         if !dir.exists() {
             let _ = fs::create_dir_all(dir);
         }
-        let save_path = dir.join("blockpop_save.json");
+        let save_path = dir.join("gridrun_save.json");
+        if !save_path.exists() && dir.join("blockpop_save.json").exists() {
+            let _ = fs::rename(dir.join("blockpop_save.json"), &save_path);
+        }
         Self { save_path }
     }
 

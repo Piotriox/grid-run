@@ -219,6 +219,42 @@ class SoundEngine {
     } catch (e) {}
   }
 
+  // Gentle, mellow Game Over dissolve sound (connected to sfxGain)
+  playGameOverCrumble() {
+    if (this.sfxLevel === 0) return;
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+
+      // Descending soft chords
+      [261.63, 220.00, 174.61].forEach((freq, idx) => {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        const filter = this.ctx.createBiquadFilter();
+
+        const t = now + idx * 0.11;
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(550, t);
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, t);
+        osc.frequency.exponentialRampToValueAtTime(freq * 0.65, t + 0.35);
+
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.linearRampToValueAtTime(0.2, t + 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.sfxGain);
+
+        osc.start(t);
+        osc.stop(t + 0.45);
+      });
+    } catch (e) {}
+  }
+
   // Calming, ambient Lo-Fi chord progression (Procedural Electric Piano / Rhodes)
   startLofiMusic() {
     if (this.isPlayingMusic) return;
@@ -317,7 +353,7 @@ class BrowserMockEngine {
     this.tray = this.generateTray();
   }
 
-  generateTray() {
+  generateTray(board = null) {
     const catalog = [
       // 1x1 Dot
       { id: 0, name: "Dot", width: 1, height: 1, cells: [[0, 0]], color: "#3B82F6" },
@@ -380,12 +416,103 @@ class BrowserMockEngine {
       { id: 32, name: "BigL_UL", width: 3, height: 3, cells: [[0, 0], [0, 1], [0, 2], [1, 0], [2, 0]], color: "#F59E0B" },
       { id: 33, name: "BigL_UR", width: 3, height: 3, cells: [[0, 0], [0, 1], [0, 2], [1, 2], [2, 2]], color: "#F59E0B" },
       { id: 34, name: "BigL_DL", width: 3, height: 3, cells: [[0, 0], [1, 0], [2, 0], [2, 1], [2, 2]], color: "#F59E0B" },
-      { id: 35, name: "BigL_DR", width: 3, height: 3, cells: [[0, 2], [1, 2], [2, 0], [2, 1], [2, 2]], color: "#F59E0B" }
+      { id: 35, name: "BigL_DR", width: 3, height: 3, cells: [[0, 2], [1, 2], [2, 0], [2, 1], [2, 2]], color: "#F59E0B" },
+
+      // 2-blocks: Diagonal 2-Dots in 2x2 area
+      { id: 36, name: "Diag2_Slash", width: 2, height: 2, cells: [[0, 1], [1, 0]], color: "#F59E0B" },
+      { id: 37, name: "Diag2_Backslash", width: 2, height: 2, cells: [[0, 0], [1, 1]], color: "#F59E0B" }
     ];
-    return [0, 1, 2].map(idx => ({
+
+    const currentBoard = board ?? this.board ?? 0n;
+    let filledCount = 0;
+    for (let i = 0; i < 64; i++) {
+      if ((currentBoard & (1n << BigInt(i))) !== 0n) filledCount++;
+    }
+    const fillRatio = filledCount / 64.0;
+
+    const getTier = (p) => {
+      const len = p.cells.length;
+      if (len <= 2) return 'tiny';
+      if (len === 3) return 'small';
+      if (len === 4) return 'medium';
+      return 'large';
+    };
+
+    const getWeight = (p, fits) => {
+      const tier = getTier(p);
+      let base = 1.0;
+      if (tier === 'tiny') base = fillRatio > 0.65 ? 4.5 : (fillRatio > 0.35 ? 2.2 : 1.0);
+      else if (tier === 'small') base = fillRatio > 0.65 ? 3.2 : (fillRatio > 0.35 ? 2.0 : 1.4);
+      else if (tier === 'medium') base = fillRatio > 0.70 ? 0.6 : 1.5;
+      else base = fillRatio > 0.70 ? 0.08 : (fillRatio > 0.50 ? 0.45 : 1.3);
+      return base * (fits ? 2.5 : 0.15);
+    };
+
+    const fittingPieces = catalog.filter(p => this.canFitPiece(p, currentBoard));
+    const selected = [];
+    const selectedIds = new Set();
+    let largeCount = 0;
+
+    // Rule 1: Guaranteed at least one piece fits
+    if (fittingPieces.length > 0) {
+      const p = fittingPieces[Math.floor(Math.random() * fittingPieces.length)];
+      selected.push({ ...p });
+      selectedIds.add(p.id);
+      if (getTier(p) === 'large') largeCount++;
+    }
+
+    // Rules 2, 3, 5: Fill up to 3 slots
+    while (selected.length < 3) {
+      let pool = catalog.filter(p => !selectedIds.has(p.id) && (getTier(p) !== 'large' || largeCount === 0));
+      if (pool.length === 0) pool = catalog.filter(p => !selectedIds.has(p.id));
+      if (pool.length === 0) pool = catalog;
+
+      // Weighted pick
+      const weights = pool.map(p => getWeight(p, this.canFitPiece(p, currentBoard)));
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+      let rand = Math.random() * totalWeight;
+      let chosen = pool[0];
+      for (let i = 0; i < pool.length; i++) {
+        rand -= weights[i];
+        if (rand <= 0) {
+          chosen = pool[i];
+          break;
+        }
+      }
+
+      selected.push({ ...chosen });
+      selectedIds.add(chosen.id);
+      if (getTier(chosen) === 'large') largeCount++;
+    }
+
+    // Shuffle slot positions
+    for (let i = selected.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [selected[i], selected[j]] = [selected[j], selected[i]];
+    }
+
+    return selected.map((piece, idx) => ({
       slot_index: idx,
-      piece: { ...catalog[Math.floor(Math.random() * catalog.length)] }
+      piece
     }));
+  }
+
+  canFitPiece(piece, board) {
+    if (!piece) return false;
+    for (let r = 0; r <= 8 - piece.height; r++) {
+      for (let c = 0; c <= 8 - piece.width; c++) {
+        let collides = false;
+        for (const [pr, pc] of piece.cells) {
+          const bit = 1n << BigInt((r + pr) * 8 + (c + pc));
+          if ((board & bit) !== 0n) {
+            collides = true;
+            break;
+          }
+        }
+        if (!collides) return true;
+      }
+    }
+    return false;
   }
 
   getState() {
@@ -419,7 +546,7 @@ class BrowserMockEngine {
 
     this.board |= mask;
     slot.piece = null;
-    let scoreDelta = piece.cells.length;
+    let scoreDelta = piece.cells.length * 10;
 
     // Check lines
     const clearedRows = [];
@@ -451,7 +578,7 @@ class BrowserMockEngine {
     const lines = clearedRows.length + clearedCols.length;
     if (lines > 0) {
       this.combo++;
-      scoreDelta += 10 * (lines * (lines + 1) / 2) * this.combo;
+      scoreDelta += 100 * (lines * (lines + 1) / 2) * this.combo;
       this.board &= ~clearMask;
     } else {
       this.combo = 0;
@@ -464,8 +591,11 @@ class BrowserMockEngine {
     }
 
     if (this.tray.every(s => !s.piece)) {
-      this.tray = this.generateTray();
+      this.tray = this.generateTray(this.board);
     }
+
+    const hasValidMove = this.tray.some(s => s.piece && this.canFitPiece(s.piece, this.board));
+    const isGameOver = !hasValidMove;
 
     this.history.push({
       step: this.history.length + 1,
@@ -479,17 +609,20 @@ class BrowserMockEngine {
       board_after: Number(this.board)
     });
 
+    const state = this.getState();
+    state.is_game_over = isGameOver;
+
     return {
       success: true,
       score_delta: scoreDelta,
       lines_cleared: lines,
       cleared_rows: clearedRows,
       cleared_cols: clearedCols,
-      is_game_over: false,
+      is_game_over: isGameOver,
       current_score: this.score,
       high_score: this.highScore,
       combo_count: this.combo,
-      game_state: this.getState()
+      game_state: state
     };
   }
 
@@ -525,6 +658,8 @@ class ParticleSystem {
     this.ctx = canvas.getContext('2d');
     this.particles = [];
     this.rings = [];
+    this.fallingBlocks = [];
+    this.dpr = 1;
   }
 
   resize(w, h, dpr) {
@@ -532,6 +667,31 @@ class ParticleSystem {
     this.canvas.height = h * dpr;
     this.ctx.scale(dpr, dpr);
     this.dpr = dpr;
+  }
+
+  // Physics Block Crumble: all placed blocks tumble downwards with gravity & rotation on Game Over
+  spawnFallingBlocks(cells, cellSize) {
+    const pad = 2;
+    for (const { r, c, color } of cells) {
+      const bx = c * cellSize + pad;
+      const by = r * cellSize + pad;
+      const bw = cellSize - pad * 2;
+      const bh = cellSize - pad * 2;
+      this.fallingBlocks.push({
+        x: bx,
+        y: by,
+        w: bw,
+        h: bh,
+        color: color || '#3B82F6',
+        vx: (Math.random() - 0.5) * 5.0,
+        vy: -(Math.random() * 3.5 + 1.5), // upward pop
+        gravity: 0.40,
+        rotation: 0,
+        rotSpeed: (Math.random() - 0.5) * 0.12,
+        alpha: 1.0,
+        decay: 0.012
+      });
+    }
   }
 
   spawnLineClear(cells, cellSize) {
@@ -613,6 +773,38 @@ class ParticleSystem {
       this.ctx.fill();
       this.ctx.restore();
     }
+
+    // Render physics falling blocks (Game Over crumble sequence)
+    for (let i = this.fallingBlocks.length - 1; i >= 0; i--) {
+      const b = this.fallingBlocks[i];
+      b.x += b.vx;
+      b.y += b.vy;
+      b.vy += b.gravity;
+      b.rotation += b.rotSpeed;
+      b.alpha -= b.decay;
+
+      if (b.alpha <= 0 || b.y > this.canvas.height / this.dpr + 150) {
+        this.fallingBlocks.splice(i, 1);
+        continue;
+      }
+
+      this.ctx.save();
+      this.ctx.globalAlpha = Math.max(0, b.alpha);
+      this.ctx.translate(b.x + b.w / 2, b.y + b.h / 2);
+      this.ctx.rotate(b.rotation);
+      this.ctx.fillStyle = b.color;
+
+      this.ctx.beginPath();
+      const hw = b.w / 2;
+      const hh = b.h / 2;
+      if (typeof this.ctx.roundRect === 'function') {
+        this.ctx.roundRect(-hw, -hh, b.w, b.h, 6);
+      } else {
+        this.ctx.rect(-hw, -hh, b.w, b.h);
+      }
+      this.ctx.fill();
+      this.ctx.restore();
+    }
   }
 }
 
@@ -650,6 +842,8 @@ class GridRunGame {
     this.goScoreEl = document.getElementById('go-score');
     this.goHighEl = document.getElementById('go-high');
     this.fxContainer = document.getElementById('fx-overlay-container');
+    this.gameoverBanner = document.getElementById('gameover-banner');
+    this.isGameOverAnimating = false;
 
     // Splash and Menu elements
     this.splashScreen = document.getElementById('splash-screen');
@@ -930,7 +1124,7 @@ class GridRunGame {
   }
 
   onPointerDown(e, slotEl) {
-    if (!this.state || this.state.is_game_over) return;
+    if (this.isGameOverAnimating || !this.state || this.state.is_game_over) return;
     const slotIdx = parseInt(slotEl.dataset.slot, 10);
     const slotData = this.state.tray[slotIdx];
     if (!slotData || !slotData.piece) return;
@@ -1273,12 +1467,39 @@ class GridRunGame {
   }
 
   triggerGameOver() {
-    this.goScoreEl.textContent = this.state.current_score;
-    this.goHighEl.textContent = this.state.high_score;
-    if (this.menuHighScoreVal) {
+    if (this.isGameOverAnimating) return;
+    this.isGameOverAnimating = true;
+
+    // Update highest score records if beaten
+    if (this.state && this.menuHighScoreVal) {
       this.menuHighScoreVal.textContent = this.state.high_score;
     }
-    this.gameoverModal.classList.remove('hidden');
+
+    // Play subtle mellow game over tone
+    soundEngine.playGameOverCrumble();
+
+    // Display minimalist grey/off-white "No spaces left!" banner over the grid
+    if (this.gameoverBanner) {
+      this.gameoverBanner.classList.remove('hidden');
+      requestAnimationFrame(() => this.gameoverBanner.classList.add('active'));
+    }
+
+    // Freeze screen: blocks stay placed and intact on grid, interaction blocked
+    this.render();
+
+    // Extended freeze duration: keep text & frozen board for ~3.2s
+    setTimeout(() => {
+      if (this.gameoverBanner) {
+        this.gameoverBanner.classList.remove('active');
+        setTimeout(() => this.gameoverBanner.classList.add('hidden'), 450);
+      }
+    }, 3200);
+
+    // Reset score to 0 and restart a fresh game cleanly after the freeze
+    setTimeout(async () => {
+      await this.resetGame();
+      this.isGameOverAnimating = false;
+    }, 3650);
   }
 
   updateUI() {

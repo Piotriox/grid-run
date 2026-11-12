@@ -689,6 +689,44 @@ body {
   display: block;
 }
 
+/* =========================================
+   In-Grid Game Over Banner (Clean, Grey/Off-White, Auto-fading)
+   ========================================= */
+.gameover-banner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.9);
+  padding: 14px 28px;
+  background: rgba(11, 15, 25, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(226, 232, 240, 0.22);
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.8), inset 0 1px 1px rgba(255, 255, 255, 0.1);
+  pointer-events: none;
+  z-index: 40;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.45s ease, transform 0.45s cubic-bezier(0.18, 0.9, 0.3, 1);
+}
+
+.gameover-banner.active {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+
+.gameover-title {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 1.5px;
+  color: #e2e8f0; /* Gri / beyazımsı renk */
+  text-shadow: 0 2px 14px rgba(226, 232, 240, 0.4);
+  white-space: nowrap;
+}
+
 #fx-canvas {
   pointer-events: none;
 }

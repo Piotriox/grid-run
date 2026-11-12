@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default capability for BlockPop","local":true,"windows":["main"],"permissions":["core:default","opener:default"]}}
+{"default":{"identifier":"default","description":"Default capability for Grid Run","local":true,"windows":["main"],"permissions":["core:default","opener:default"]}}

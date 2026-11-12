@@ -12,6 +12,6 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "BlockPop"
+rootProject.name = "Grid Run"
 include ':app'
 
