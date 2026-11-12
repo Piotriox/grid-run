@@ -441,10 +441,15 @@ class BrowserMockEngine {
     const getWeight = (p, fits) => {
       const tier = getTier(p);
       let base = 1.0;
-      if (tier === 'tiny') base = fillRatio > 0.65 ? 4.5 : (fillRatio > 0.35 ? 2.2 : 1.0);
-      else if (tier === 'small') base = fillRatio > 0.65 ? 3.2 : (fillRatio > 0.35 ? 2.0 : 1.4);
-      else if (tier === 'medium') base = fillRatio > 0.70 ? 0.6 : 1.5;
-      else base = fillRatio > 0.70 ? 0.08 : (fillRatio > 0.50 ? 0.45 : 1.3);
+      if (tier === 'tiny') {
+        base = fillRatio >= 0.70 ? 6.0 : (fillRatio >= 0.55 ? 4.5 : (fillRatio >= 0.40 ? 2.5 : 1.0));
+      } else if (tier === 'small') {
+        base = fillRatio >= 0.70 ? 4.0 : (fillRatio >= 0.55 ? 3.5 : (fillRatio >= 0.40 ? 2.2 : 1.4));
+      } else if (tier === 'medium') {
+        base = fillRatio >= 0.70 ? 0.3 : (fillRatio >= 0.55 ? 0.8 : 1.5);
+      } else {
+        base = fillRatio >= 0.55 ? 0.0 : (fillRatio >= 0.40 ? 0.25 : 1.2);
+      }
       return base * (fits ? 2.5 : 0.15);
     };
 
@@ -453,31 +458,88 @@ class BrowserMockEngine {
     const selectedIds = new Set();
     let largeCount = 0;
 
-    // Rule 1: Guaranteed at least one piece fits
-    if (fittingPieces.length > 0) {
-      const p = fittingPieces[Math.floor(Math.random() * fittingPieces.length)];
-      selected.push({ ...p });
-      selectedIds.add(p.id);
-      if (getTier(p) === 'large') largeCount++;
+    // Rule 3: Smart Line-Clear Simulation / Priority
+    // If fillRatio >= 0.50, look for pieces that will trigger at least one line clear and offer one with 60% probability.
+    if (fillRatio >= 0.50) {
+      const clearingPieces = fittingPieces.filter(p =>
+        this.canClearAnyLine(p, currentBoard) &&
+        !(getTier(p) === 'large' && fillRatio >= 0.55)
+      );
+      if (clearingPieces.length > 0 && Math.random() < 0.60) {
+        const weights = clearingPieces.map(p => Math.max(0.1, getWeight(p, true)));
+        const totalWeight = weights.reduce((a, b) => a + b, 0);
+        let rand = Math.random() * totalWeight;
+        let chosen = clearingPieces[0];
+        for (let i = 0; i < clearingPieces.length; i++) {
+          rand -= weights[i];
+          if (rand <= 0) {
+            chosen = clearingPieces[i];
+            break;
+          }
+        }
+        selected.push({ ...chosen });
+        selectedIds.add(chosen.id);
+        if (getTier(chosen) === 'large') largeCount++;
+      }
     }
 
-    // Rules 2, 3, 5: Fill up to 3 slots
-    while (selected.length < 3) {
-      let pool = catalog.filter(p => !selectedIds.has(p.id) && (getTier(p) !== 'large' || largeCount === 0));
-      if (pool.length === 0) pool = catalog.filter(p => !selectedIds.has(p.id));
-      if (pool.length === 0) pool = catalog;
+    // Rule 1: Guaranteed Solvability - Guarantee AT LEAST 2 pieces fit on the board (or all available if < 2)
+    const targetFittingCount = Math.min(2, fittingPieces.length);
+    let currentFittingSelected = selected.filter(p => this.canFitPiece(p, currentBoard)).length;
 
-      // Weighted pick
-      const weights = pool.map(p => getWeight(p, this.canFitPiece(p, currentBoard)));
+    while (currentFittingSelected < targetFittingCount) {
+      const availableFitting = fittingPieces.filter(p =>
+        !selectedIds.has(p.id) &&
+        !(getTier(p) === 'large' && (largeCount >= 1 || fillRatio >= 0.55))
+      );
+      if (availableFitting.length === 0) break;
+
+      const weights = availableFitting.map(p => Math.max(0.01, getWeight(p, true)));
       const totalWeight = weights.reduce((a, b) => a + b, 0);
       let rand = Math.random() * totalWeight;
-      let chosen = pool[0];
-      for (let i = 0; i < pool.length; i++) {
+      let chosen = availableFitting[0];
+      for (let i = 0; i < availableFitting.length; i++) {
         rand -= weights[i];
         if (rand <= 0) {
-          chosen = pool[i];
+          chosen = availableFitting[i];
           break;
         }
+      }
+
+      selected.push({ ...chosen });
+      selectedIds.add(chosen.id);
+      if (getTier(chosen) === 'large') largeCount++;
+      currentFittingSelected++;
+    }
+
+    // Rules 2, 4, 5: Fill remaining slots up to 3 with dynamic weights and variety rules
+    while (selected.length < 3) {
+      let pool = catalog.filter(p =>
+        !selectedIds.has(p.id) &&
+        !(getTier(p) === 'large' && (largeCount >= 1 || fillRatio >= 0.55))
+      );
+      if (pool.length === 0) {
+        pool = catalog.filter(p => !selectedIds.has(p.id));
+      }
+      if (pool.length === 0) {
+        pool = catalog;
+      }
+
+      const weights = pool.map(p => getWeight(p, this.canFitPiece(p, currentBoard)));
+      const totalWeight = weights.reduce((a, b) => a + b, 0);
+
+      let chosen = pool[0];
+      if (totalWeight > 0) {
+        let rand = Math.random() * totalWeight;
+        for (let i = 0; i < pool.length; i++) {
+          rand -= weights[i];
+          if (rand <= 0) {
+            chosen = pool[i];
+            break;
+          }
+        }
+      } else {
+        chosen = pool[Math.floor(Math.random() * pool.length)];
       }
 
       selected.push({ ...chosen });
@@ -495,6 +557,48 @@ class BrowserMockEngine {
       slot_index: idx,
       piece
     }));
+  }
+
+  canClearAnyLine(piece, board) {
+    if (!piece || piece.height > 8 || piece.width > 8) return false;
+    for (let r = 0; r <= 8 - piece.height; r++) {
+      for (let c = 0; c <= 8 - piece.width; c++) {
+        let collides = false;
+        let mask = 0n;
+        for (const [pr, pc] of piece.cells) {
+          const bit = 1n << BigInt((r + pr) * 8 + (c + pc));
+          if ((board & bit) !== 0n) {
+            collides = true;
+            break;
+          }
+          mask |= bit;
+        }
+        if (!collides) {
+          const placedBoard = board | mask;
+          for (let row = 0; row < 8; row++) {
+            let rowFull = true;
+            for (let col = 0; col < 8; col++) {
+              if ((placedBoard & (1n << BigInt(row * 8 + col))) === 0n) {
+                rowFull = false;
+                break;
+              }
+            }
+            if (rowFull) return true;
+          }
+          for (let col = 0; col < 8; col++) {
+            let colFull = true;
+            for (let row = 0; row < 8; row++) {
+              if ((placedBoard & (1n << BigInt(row * 8 + col))) === 0n) {
+                colFull = false;
+                break;
+              }
+            }
+            if (colFull) return true;
+          }
+        }
+      }
+    }
+    return false;
   }
 
   canFitPiece(piece, board) {

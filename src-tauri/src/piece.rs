@@ -1,4 +1,4 @@
-use crate::bitboard::{Bitboard, COL_MASKS, ROW_MASKS};
+use crate::bitboard::Bitboard;
 use rand::distributions::{Distribution, WeightedIndex};
 use rand::seq::SliceRandom;
 use rand::Rng;
@@ -73,6 +73,29 @@ impl PieceTemplate {
                 if let Some(mask) = self.to_mask(r, c) {
                     if !board.collides_with(mask) {
                         return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Checks if placing this piece anywhere on the board will trigger at least one line clear.
+    #[inline]
+    pub fn can_clear_any_line(&self, board: Bitboard) -> bool {
+        if self.height > 8 || self.width > 8 {
+            return false;
+        }
+
+        for r in 0..=(8 - self.height) {
+            for c in 0..=(8 - self.width) {
+                if let Some(mask) = self.to_mask(r, c) {
+                    if !board.collides_with(mask) {
+                        let placed = Bitboard(board.0 | mask);
+                        let (_, rows, cols, _) = placed.clear_completed_lines();
+                        if rows > 0 || cols > 0 {
+                            return true;
+                        }
                     }
                 }
             }
@@ -177,40 +200,51 @@ pub struct TraySlot {
 }
 
 /// Determines dynamic weight multiplier for a piece based on board fill ratio and playability.
+/// Tiered Fill Protection:
+/// - fill_ratio < 0.40: Roomy mode (Large pieces normal)
+/// - 0.40 <= fill_ratio < 0.55: Caution mode (Large pieces throttled, 3 & 4 blocks favored)
+/// - 0.55 <= fill_ratio < 0.70: Recovery mode (Large pieces weight 0; dots & dominos favored)
+/// - fill_ratio >= 0.70: Emergency mode (Large pieces weight 0; dots & dominos lifelines)
 fn get_piece_weight(piece: &PieceTemplate, fill_ratio: f32, fits: bool) -> f32 {
     let base_weight = match piece.tier() {
         PieceTier::Tiny => {
-            if fill_ratio > 0.65 {
+            if fill_ratio >= 0.70 {
+                6.0
+            } else if fill_ratio >= 0.55 {
                 4.5
-            } else if fill_ratio > 0.35 {
-                2.2
+            } else if fill_ratio >= 0.40 {
+                2.5
             } else {
                 1.0
             }
         }
         PieceTier::Small => {
-            if fill_ratio > 0.65 {
-                3.2
-            } else if fill_ratio > 0.35 {
-                2.0
+            if fill_ratio >= 0.70 {
+                4.0
+            } else if fill_ratio >= 0.55 {
+                3.5
+            } else if fill_ratio >= 0.40 {
+                2.2
             } else {
                 1.4
             }
         }
         PieceTier::Medium => {
-            if fill_ratio > 0.70 {
-                0.6
+            if fill_ratio >= 0.70 {
+                0.3
+            } else if fill_ratio >= 0.55 {
+                0.8
             } else {
                 1.5
             }
         }
         PieceTier::Large => {
-            if fill_ratio > 0.70 {
-                0.08
-            } else if fill_ratio > 0.50 {
-                0.45
+            if fill_ratio >= 0.55 {
+                0.0
+            } else if fill_ratio >= 0.40 {
+                0.25
             } else {
-                1.3
+                1.2
             }
         }
     };
@@ -219,11 +253,11 @@ fn get_piece_weight(piece: &PieceTemplate, fill_ratio: f32, fits: bool) -> f32 {
     base_weight * fit_multiplier
 }
 
-/// Generates 3 smart, player-friendly pieces following all 5 Director AI rules:
-/// 1. Guaranteed Solvability: At least one piece is guaranteed to fit on the current board.
-/// 2. Dynamic Weighting: Danger zones boost lifelines (dots, dominos), roomy boards offer big combos.
-/// 3. Bag / Category Balance: Max 1 Large piece per tray; balanced variety.
-/// 4. Near-Clear Assistance: Opportunities to finish 7/8 lines with high reward.
+/// Generates 3 smart, player-friendly pieces following the Director AI rules:
+/// 1. Guaranteed Solvability: At least TWO pieces are guaranteed to fit on the current board (if catalog allows).
+/// 2. Tiered Fill Protection: When board gets crowded, throttle/eliminate Large pieces and spawn lifelines.
+/// 3. Smart Line-Clear Simulation: When fill_ratio >= 0.50, 60% chance to offer a line-clearing piece.
+/// 4. Category Balance: Max 1 Large piece per tray; zero Large pieces when fill_ratio >= 0.55.
 /// 5. No Duplicates: The 3 slots never roll the identical piece ID.
 pub fn generate_smart_tray<R: Rng + ?Sized>(board: Bitboard, rng: &mut R) -> [TraySlot; 3] {
     let catalog = get_piece_catalog();
@@ -233,67 +267,78 @@ pub fn generate_smart_tray<R: Rng + ?Sized>(board: Bitboard, rng: &mut R) -> [Tr
     let mut selected_ids: Vec<usize> = Vec::with_capacity(3);
     let mut large_count = 0;
 
-    // Rule 4: Check if any row or col has 7 filled cells (1 empty)
-    let mut has_near_clear = false;
-    for &mask in &ROW_MASKS {
-        if (board.0 & mask).count_ones() == 7 {
-            has_near_clear = true;
-            break;
-        }
-    }
-    if !has_near_clear {
-        for &mask in &COL_MASKS {
-            if (board.0 & mask).count_ones() == 7 {
-                has_near_clear = true;
-                break;
-            }
-        }
-    }
-
-    // Rule 1: Gather all pieces that mathematically fit on the board
+    // Rule 1 Prep: Gather all pieces that mathematically fit on the board
     let fitting_pieces: Vec<&PieceTemplate> = catalog.iter().filter(|p| p.can_fit_on_board(board)).collect();
 
-    // Lifeline: If near-clear exists, 35% chance to offer a small/tiny piece that fits
-    if has_near_clear && rng.gen_bool(0.35) {
-        let lifelines: Vec<&PieceTemplate> = fitting_pieces
+    // Rule 3: Smart Line-Clear Simulation / Priority
+    // If fill_ratio >= 0.50, look for pieces that will trigger at least one line clear and offer one with 60% probability.
+    if fill_ratio >= 0.50 {
+        let clearing_pieces: Vec<&PieceTemplate> = fitting_pieces
             .iter()
             .copied()
-            .filter(|p| p.cells.len() <= 2)
+            .filter(|p| p.can_clear_any_line(board))
+            .filter(|p| !(p.tier() == PieceTier::Large && fill_ratio >= 0.55))
             .collect();
 
-        if let Some(chosen) = lifelines.choose(rng) {
-            selected_pieces.push((*chosen).clone());
-            selected_ids.push(chosen.id);
-            if chosen.tier() == PieceTier::Large {
-                large_count += 1;
+        if !clearing_pieces.is_empty() && rng.gen_bool(0.60) {
+            let weights: Vec<f32> = clearing_pieces
+                .iter()
+                .map(|p| get_piece_weight(p, fill_ratio, true).max(0.1))
+                .collect();
+
+            if let Ok(dist) = WeightedIndex::new(&weights) {
+                let chosen = clearing_pieces[dist.sample(rng)];
+                selected_pieces.push((*chosen).clone());
+                selected_ids.push(chosen.id);
+                if chosen.tier() == PieceTier::Large {
+                    large_count += 1;
+                }
+            } else if let Some(chosen) = clearing_pieces.choose(rng) {
+                selected_pieces.push((*chosen).clone());
+                selected_ids.push(chosen.id);
+                if chosen.tier() == PieceTier::Large {
+                    large_count += 1;
+                }
             }
         }
     }
 
-    // Rule 1: Ensure at least one guaranteed fitting piece in the tray
-    if selected_pieces.is_empty() && !fitting_pieces.is_empty() {
-        let weights: Vec<f32> = fitting_pieces
+    // Rule 1: Guaranteed Solvability - Guarantee AT LEAST 2 pieces fit on the board (or all available if < 2)
+    let target_fitting_count = 2.min(fitting_pieces.len());
+    let mut current_fitting_selected = selected_pieces.iter().filter(|p| p.can_fit_on_board(board)).count();
+
+    while current_fitting_selected < target_fitting_count {
+        let available_fitting: Vec<&PieceTemplate> = fitting_pieces
             .iter()
-            .map(|p| get_piece_weight(p, fill_ratio, true))
+            .copied()
+            .filter(|p| !selected_ids.contains(&p.id))
+            .filter(|p| !(p.tier() == PieceTier::Large && (large_count >= 1 || fill_ratio >= 0.55)))
             .collect();
 
-        if let Ok(dist) = WeightedIndex::new(&weights) {
-            let chosen = fitting_pieces[dist.sample(rng)];
-            selected_pieces.push((*chosen).clone());
-            selected_ids.push(chosen.id);
-            if chosen.tier() == PieceTier::Large {
-                large_count += 1;
-            }
-        } else if let Some(chosen) = fitting_pieces.choose(rng) {
-            selected_pieces.push((*chosen).clone());
-            selected_ids.push(chosen.id);
-            if chosen.tier() == PieceTier::Large {
-                large_count += 1;
-            }
+        if available_fitting.is_empty() {
+            break;
         }
+
+        let weights: Vec<f32> = available_fitting
+            .iter()
+            .map(|p| get_piece_weight(p, fill_ratio, true).max(0.01))
+            .collect();
+
+        let chosen = if let Ok(dist) = WeightedIndex::new(&weights) {
+            available_fitting[dist.sample(rng)]
+        } else {
+            *available_fitting.choose(rng).unwrap()
+        };
+
+        selected_pieces.push((*chosen).clone());
+        selected_ids.push(chosen.id);
+        if chosen.tier() == PieceTier::Large {
+            large_count += 1;
+        }
+        current_fitting_selected += 1;
     }
 
-    // Rules 2, 3, 5: Fill remaining slots with dynamic weights and variety rules
+    // Rules 2, 4, 5: Fill remaining slots up to 3 with dynamic weights and variety rules
     while selected_pieces.len() < 3 {
         let candidates: Vec<&PieceTemplate> = catalog
             .iter()
@@ -301,8 +346,8 @@ pub fn generate_smart_tray<R: Rng + ?Sized>(board: Bitboard, rng: &mut R) -> [Tr
                 if selected_ids.contains(&p.id) {
                     return false; // Rule 5: No duplicate piece IDs
                 }
-                if p.tier() == PieceTier::Large && large_count >= 1 {
-                    return false; // Rule 3: Max 1 Large piece
+                if p.tier() == PieceTier::Large && (large_count >= 1 || fill_ratio >= 0.55) {
+                    return false; // Max 1 Large piece and 0 Large if fill_ratio >= 0.55
                 }
                 true
             })
@@ -331,14 +376,20 @@ pub fn generate_smart_tray<R: Rng + ?Sized>(board: Bitboard, rng: &mut R) -> [Tr
             })
             .collect();
 
-        if let Ok(dist) = WeightedIndex::new(&weights) {
-            let chosen = candidates[dist.sample(rng)];
-            selected_pieces.push((*chosen).clone());
-            selected_ids.push(chosen.id);
-            if chosen.tier() == PieceTier::Large {
-                large_count += 1;
+        let all_zero = weights.iter().all(|&w| w <= 0.0);
+        if !all_zero {
+            if let Ok(dist) = WeightedIndex::new(&weights) {
+                let chosen = candidates[dist.sample(rng)];
+                selected_pieces.push((*chosen).clone());
+                selected_ids.push(chosen.id);
+                if chosen.tier() == PieceTier::Large {
+                    large_count += 1;
+                }
+                continue;
             }
-        } else if let Some(chosen) = candidates.choose(rng) {
+        }
+
+        if let Some(chosen) = candidates.choose(rng) {
             selected_pieces.push((*chosen).clone());
             selected_ids.push(chosen.id);
             if chosen.tier() == PieceTier::Large {
@@ -347,7 +398,7 @@ pub fn generate_smart_tray<R: Rng + ?Sized>(board: Bitboard, rng: &mut R) -> [Tr
         }
     }
 
-    // Shuffle slot positions so the guaranteed fitting piece isn't predictably slot 0
+    // Shuffle slot positions so the guaranteed fitting pieces aren't predictably in slots 0 and 1
     selected_pieces.shuffle(rng);
 
     [
