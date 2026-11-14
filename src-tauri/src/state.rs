@@ -41,6 +41,8 @@ pub struct GameState {
     pub current_score: u32,
     pub high_score: u32,
     pub combo_count: u32,
+    #[serde(default)]
+    pub cleared_in_round: bool,
     pub tray: [TraySlot; 3],
     pub is_game_over: bool,
     pub move_history: Vec<MoveRecord>,
@@ -65,6 +67,7 @@ impl GameState {
             current_score: 0,
             high_score,
             combo_count: 0,
+            cleared_in_round: false,
             tray,
             is_game_over: false,
             move_history: Vec::with_capacity(256),
@@ -142,13 +145,17 @@ impl GameState {
                 }
             }
 
-            self.combo_count += 1;
+            // Round-based combo: increment combo on first line-clear of the current 3-block round
+            if !self.cleared_in_round {
+                self.combo_count += 1;
+                self.cleared_in_round = true;
+            }
+
             // Line clear score formula (10x scaling): 100 * N * (N + 1) / 2 * combo multiplier
-            let line_points = 100 * (total_lines * (total_lines + 1) / 2) * self.combo_count;
+            let multiplier = if self.combo_count > 0 { self.combo_count } else { 1 };
+            let line_points = 100 * (total_lines * (total_lines + 1) / 2) * multiplier;
             score_delta += line_points;
             self.board = cleaned_board;
-        } else {
-            self.combo_count = 0;
         }
 
         self.current_score += score_delta;
@@ -159,10 +166,17 @@ impl GameState {
         // Sync grid array for frontend
         self.grid_array = self.board.to_grid_array();
 
-        // Check if tray needs refill
+        // Check if tray needs refill (end of round)
         let mut new_tray_spawned = false;
         let tray_empty = self.tray.iter().all(|s| s.piece.is_none());
         if tray_empty {
+            // If the player completed this entire 3-piece round without any clear, combo resets!
+            if !self.cleared_in_round {
+                self.combo_count = 0;
+            }
+            // Reset the round clear flag for the newly spawned round
+            self.cleared_in_round = false;
+
             let mut rng = thread_rng();
             self.tray = generate_smart_tray(self.board, &mut rng);
             new_tray_spawned = true;

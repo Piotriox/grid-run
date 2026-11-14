@@ -347,6 +347,9 @@ class SoundEngine {
 
 const soundEngine = new SoundEngine();
 
+// Prevent default context menu, long-press popups and touch selections globally
+window.addEventListener('contextmenu', (e) => e.preventDefault());
+
 // Automatically pause all game audio when app is minimized, locked, or backgrounded on Android/iOS/Desktop
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
@@ -386,6 +389,7 @@ class BrowserMockEngine {
     this.score = 0;
     this.highScore = parseInt(localStorage.getItem('gridrun_high_score') || '0', 10);
     this.combo = 0;
+    this.clearedInRound = false;
     this.history = [];
     this.tray = this.generateTray();
   }
@@ -457,7 +461,18 @@ class BrowserMockEngine {
 
       // 2-blocks: Diagonal 2-Dots in 2x2 area
       { id: 36, name: "Diag2_Slash", width: 2, height: 2, cells: [[0, 1], [1, 0]], color: "#F59E0B" },
-      { id: 37, name: "Diag2_Backslash", width: 2, height: 2, cells: [[0, 0], [1, 1]], color: "#F59E0B" }
+      { id: 37, name: "Diag2_Backslash", width: 2, height: 2, cells: [[0, 0], [1, 1]], color: "#F59E0B" },
+
+      // 6-blocks: Rectangles (Horizontal 3x2 and Vertical 2x3)
+      { id: 38, name: "Rect3x2H", width: 3, height: 2, cells: [
+        [0, 0], [0, 1], [0, 2],
+        [1, 0], [1, 1], [1, 2]
+      ], color: "#EC4899" },
+      { id: 39, name: "Rect2x3V", width: 2, height: 3, cells: [
+        [0, 0], [0, 1],
+        [1, 0], [1, 1],
+        [2, 0], [2, 1]
+      ], color: "#EC4899" }
     ];
 
     const currentBoard = board ?? this.board ?? 0n;
@@ -718,11 +733,13 @@ class BrowserMockEngine {
 
     const lines = clearedRows.length + clearedCols.length;
     if (lines > 0) {
-      this.combo++;
-      scoreDelta += 100 * (lines * (lines + 1) / 2) * this.combo;
+      if (!this.clearedInRound) {
+        this.combo++;
+        this.clearedInRound = true;
+      }
+      const mult = this.combo > 0 ? this.combo : 1;
+      scoreDelta += 100 * (lines * (lines + 1) / 2) * mult;
       this.board &= ~clearMask;
-    } else {
-      this.combo = 0;
     }
 
     this.score += scoreDelta;
@@ -731,8 +748,14 @@ class BrowserMockEngine {
       localStorage.setItem('gridrun_high_score', this.highScore.toString());
     }
 
+    let newTraySpawned = false;
     if (this.tray.every(s => !s.piece)) {
+      if (!this.clearedInRound) {
+        this.combo = 0;
+      }
+      this.clearedInRound = false;
       this.tray = this.generateTray(this.board);
+      newTraySpawned = true;
     }
 
     const hasValidMove = this.tray.some(s => s.piece && this.canFitPiece(s.piece, this.board));
@@ -760,6 +783,7 @@ class BrowserMockEngine {
       cleared_rows: clearedRows,
       cleared_cols: clearedCols,
       is_game_over: isGameOver,
+      new_tray_spawned: newTraySpawned,
       current_score: this.score,
       high_score: this.highScore,
       combo_count: this.combo,
@@ -771,6 +795,7 @@ class BrowserMockEngine {
     this.board = 0n;
     this.score = 0;
     this.combo = 0;
+    this.clearedInRound = false;
     this.history = [];
     this.tray = this.generateTray();
     return this.getState();
@@ -1008,6 +1033,32 @@ class GridRunGame {
     this.sliderSfx = document.getElementById('slider-sfx');
     this.sfxVolVal = document.getElementById('sfx-vol-val');
 
+    // Changelog State & Elements
+    this.changelogs = [
+      {
+        version: "Version 1.1.0",
+        items: [
+          { tag: "feature", text: "New 2x3 and 3x2 rectangular blocks added." },
+          { tag: "feature", text: "Line-clear anticipation glow preview." },
+          { tag: "feature", text: "Round-based combo streak progression." },
+          { tag: "feature", text: "Misty smoke puff tray regeneration effect." },
+          { tag: "fix", text: "Gameplay HUD layout & spacing polished." },
+          { tag: "fix", text: "Touch selection and blue highlights prevented." }
+        ]
+      },
+      {
+        version: "Version 1.0.0",
+        items: [
+          { tag: "release", text: "Grid Run released (13.11.2026)." }
+        ]
+      }
+    ];
+    this.currentChangelogIndex = 0;
+    this.btnChangelogPrev = document.getElementById('btn-changelog-prev');
+    this.btnChangelogNext = document.getElementById('btn-changelog-next');
+    this.changelogVersionEl = document.getElementById('changelog-version');
+    this.changelogListEl = document.getElementById('changelog-list');
+
     // Drag State
     this.activeDrag = null;
 
@@ -1016,6 +1067,7 @@ class GridRunGame {
 
   async init() {
     this.bindEvents();
+    this.renderChangelog();
     this.handleResize();
     window.addEventListener('resize', () => this.handleResize());
 
@@ -1023,6 +1075,9 @@ class GridRunGame {
     const loop = () => {
       this.fx.updateAndRender();
       this.render();
+      if (this.activeDrag) {
+        this.renderDragPiece();
+      }
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -1111,6 +1166,8 @@ class GridRunGame {
       this.menuHighScoreVal.textContent = currentHigh;
     }
 
+    this.renderChangelog();
+
     // Show menu overlay with solid background
     if (this.menuOverlay) {
       this.menuOverlay.classList.remove('hidden');
@@ -1144,6 +1201,41 @@ class GridRunGame {
     if (this.menuViewMain && this.menuViewSettings) {
       this.menuViewSettings.classList.remove('active');
       this.menuViewMain.classList.add('active');
+    }
+  }
+
+  renderChangelog() {
+    if (!this.changelogVersionEl || !this.changelogs || !this.changelogs.length) return;
+    const current = this.changelogs[this.currentChangelogIndex];
+    if (!current) return;
+
+    this.changelogVersionEl.textContent = current.version;
+
+    if (this.btnChangelogPrev) {
+      this.btnChangelogPrev.disabled = this.currentChangelogIndex <= 0;
+    }
+    if (this.btnChangelogNext) {
+      this.btnChangelogNext.disabled = this.currentChangelogIndex >= this.changelogs.length - 1;
+    }
+
+    if (this.changelogListEl) {
+      this.changelogListEl.innerHTML = '';
+      current.items.forEach(item => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'changelog-item';
+
+        const tagEl = document.createElement('span');
+        tagEl.className = `changelog-tag tag-${item.tag}`;
+        tagEl.textContent = item.tag;
+
+        const textEl = document.createElement('span');
+        textEl.className = 'changelog-item-text';
+        textEl.textContent = item.text;
+
+        itemEl.appendChild(tagEl);
+        itemEl.appendChild(textEl);
+        this.changelogListEl.appendChild(itemEl);
+      });
     }
   }
 
@@ -1228,6 +1320,27 @@ class GridRunGame {
       this.sliderSfx.addEventListener('change', handleSfxChange);
     }
 
+    // Changelog Navigation
+    if (this.btnChangelogPrev) {
+      this.btnChangelogPrev.addEventListener('click', () => {
+        if (this.currentChangelogIndex > 0) {
+          this.currentChangelogIndex--;
+          this.renderChangelog();
+          soundEngine.playSoftPop();
+        }
+      });
+    }
+
+    if (this.btnChangelogNext) {
+      this.btnChangelogNext.addEventListener('click', () => {
+        if (this.currentChangelogIndex < this.changelogs.length - 1) {
+          this.currentChangelogIndex++;
+          this.renderChangelog();
+          soundEngine.playSoftPop();
+        }
+      });
+    }
+
     // Navigation buttons
     const btnBackMenu = document.getElementById('btn-back-menu');
     if (btnBackMenu) {
@@ -1285,7 +1398,8 @@ class GridRunGame {
       touchLiftY,
       targetCol: null,
       targetRow: null,
-      isValid: false
+      isValid: false,
+      previewClears: null
     };
 
     this.renderDragPiece();
@@ -1318,10 +1432,16 @@ class GridRunGame {
       this.activeDrag.targetCol = col;
       this.activeDrag.targetRow = row;
       this.activeDrag.isValid = this.checkPlacementValidity(piece, row, col);
+      if (this.activeDrag.isValid) {
+        this.activeDrag.previewClears = this.getPotentialLineClears(piece, row, col);
+      } else {
+        this.activeDrag.previewClears = null;
+      }
     } else {
       this.activeDrag.targetCol = null;
       this.activeDrag.targetRow = null;
       this.activeDrag.isValid = false;
+      this.activeDrag.previewClears = null;
     }
 
     this.renderDragPiece();
@@ -1337,6 +1457,68 @@ class GridRunGame {
       }
     }
     return true;
+  }
+
+  // Pre-calculate line clears that would be triggered if the piece is placed
+  getPotentialLineClears(piece, originRow, originCol) {
+    if (!this.state || !this.state.grid_array) {
+      return { rows: [], cols: [], explodingCells: new Set() };
+    }
+
+    // Build virtual 8x8 grid
+    const virtualGrid = Array.from({ length: 8 }, (_, r) =>
+      Array.from({ length: 8 }, (_, c) => Boolean(this.state.grid_array[r][c]))
+    );
+
+    // Overlay piece onto virtual grid
+    for (const [r, c] of piece.cells) {
+      const vr = originRow + r;
+      const vc = originCol + c;
+      if (vr < 8 && vc < 8) {
+        virtualGrid[vr][vc] = true;
+      }
+    }
+
+    const clearedRows = [];
+    const clearedCols = [];
+
+    // Check complete rows
+    for (let r = 0; r < 8; r++) {
+      let isRowFull = true;
+      for (let c = 0; c < 8; c++) {
+        if (!virtualGrid[r][c]) {
+          isRowFull = false;
+          break;
+        }
+      }
+      if (isRowFull) clearedRows.push(r);
+    }
+
+    // Check complete columns
+    for (let c = 0; c < 8; c++) {
+      let isColFull = true;
+      for (let r = 0; r < 8; r++) {
+        if (!virtualGrid[r][c]) {
+          isColFull = false;
+          break;
+        }
+      }
+      if (isColFull) clearedCols.push(c);
+    }
+
+    const explodingCells = new Set();
+    clearedRows.forEach(r => {
+      for (let c = 0; c < 8; c++) explodingCells.add(`${r},${c}`);
+    });
+    clearedCols.forEach(c => {
+      for (let r = 0; r < 8; r++) explodingCells.add(`${r},${c}`);
+    });
+
+    return {
+      rows: clearedRows,
+      cols: clearedCols,
+      explodingCells
+    };
   }
 
   // Draw the dragged piece smoothly across the entire screen on dragCanvas
@@ -1384,6 +1566,7 @@ class GridRunGame {
     document.querySelectorAll('.piece-slot').forEach(s => s.classList.remove('dragging'));
 
     if (drag.isValid && drag.targetCol !== null && drag.targetRow !== null) {
+      const hadPiecesBefore = this.state && this.state.tray ? this.state.tray.filter(s => s.piece).length : 0;
       try {
         const result = await callIPC('validate_and_place_piece', {
           piece_id: drag.slotIndex,
@@ -1403,6 +1586,8 @@ class GridRunGame {
 
           const previousScore = this.state ? this.state.current_score : 0;
           this.state = result.game_state;
+
+          const isNewTray = Boolean(result.new_tray_spawned || (hadPiecesBefore === 1 && result.game_state.tray.every(s => s.piece)));
 
           // Particle burst, sound & flying score effect for cleared lines
           if (result.lines_cleared > 0) {
@@ -1433,6 +1618,10 @@ class GridRunGame {
           } else {
             soundEngine.playSoftPop();
             this.updateUI();
+          }
+
+          if (isNewTray) {
+            this.triggerTraySmokeSpawn();
           }
 
           if (result.is_game_over) {
@@ -1663,12 +1852,17 @@ class GridRunGame {
     this.renderTray();
   }
 
-  // Render 8x8 Grid and Drag Ghost in actual piece colors
+  // Render 8x8 Grid and Drag Ghost in actual piece colors with Anticipation Line-Clear Glow
   render() {
     const ctx = this.ctx;
     const w = this.gridPixelSize;
     const cs = this.cellSize;
     ctx.clearRect(0, 0, w, w);
+
+    const previewClears = (this.activeDrag && this.activeDrag.isValid) ? this.activeDrag.previewClears : null;
+    const hasClears = Boolean(previewClears && previewClears.explodingCells && previewClears.explodingCells.size > 0);
+    const now = performance.now();
+    const glowPulse = 0.5 + 0.5 * Math.sin(now / 110);
 
     // Draw background empty slots & placed blocks in their authentic colors
     for (let r = 0; r < 8; r++) {
@@ -1679,23 +1873,38 @@ class GridRunGame {
 
         if (isOccupied) {
           const cellColor = (this.gridColors[r] && this.gridColors[r][c]) || '#3B82F6';
-          this.drawCell(ctx, x, y, cs, cellColor);
+          const isExploding = hasClears && previewClears.explodingCells.has(`${r},${c}`);
+          this.drawCell(ctx, x, y, cs, cellColor, null, isExploding, glowPulse);
         } else {
           this.drawEmptyCell(ctx, x, y, cs);
         }
       }
     }
 
-    // Draw Ghost Preview if dragging over grid with piece's original color
+    // Draw Ghost Preview if dragging over grid with piece's original color & line-clear anticipation glow
     if (this.activeDrag && this.activeDrag.targetCol !== null && this.activeDrag.targetRow !== null) {
       const { piece, targetCol, targetRow, isValid } = this.activeDrag;
-      const ghostFill = isValid ? hexToRgba(piece.color, 0.45) : 'rgba(239, 68, 68, 0.4)';
-      const ghostStroke = isValid ? piece.color : '#EF4444';
 
       for (const [r, c] of piece.cells) {
         const gx = (targetCol + c) * cs;
         const gy = (targetRow + r) * cs;
-        this.drawCell(ctx, gx, gy, cs, ghostFill, ghostStroke);
+        const tr = targetRow + r;
+        const tc = targetCol + c;
+
+        if (isValid) {
+          const isExploding = hasClears && previewClears.explodingCells.has(`${tr},${tc}`);
+          if (isExploding) {
+            // Subtle glowing ghost block matching the exploding line
+            const ghostFill = hexToRgba(piece.color, 0.50 + 0.10 * glowPulse);
+            this.drawCell(ctx, gx, gy, cs, ghostFill, null, true, glowPulse);
+          } else {
+            const ghostFill = hexToRgba(piece.color, 0.40);
+            const ghostStroke = piece.color;
+            this.drawCell(ctx, gx, gy, cs, ghostFill, ghostStroke, false);
+          }
+        } else {
+          this.drawCell(ctx, gx, gy, cs, 'rgba(239, 68, 68, 0.4)', '#EF4444', false);
+        }
       }
     }
   }
@@ -1729,8 +1938,8 @@ class GridRunGame {
     ctx.restore();
   }
 
-  // Modern physical block rendering with tactile depth & bevel highlight
-  drawCell(ctx, x, y, size, color, strokeColor = null) {
+  // Modern physical block rendering with tactile depth, bevel highlight & line-clear subtle highlight
+  drawCell(ctx, x, y, size, color, strokeColor = null, isGlow = false, glowPulse = 0) {
     const pad = 2;
     const innerSize = size - pad * 2;
     const rx = x + pad;
@@ -1738,6 +1947,13 @@ class GridRunGame {
     const r = 7;
 
     ctx.save();
+
+    if (isGlow) {
+      // Very soft, restrained ambient glow (not blinding)
+      ctx.shadowColor = 'rgba(255, 255, 255, 0.25)';
+      ctx.shadowBlur = 4 + 3 * glowPulse;
+    }
+
     // Base block color
     ctx.fillStyle = color;
     ctx.beginPath();
@@ -1745,18 +1961,32 @@ class GridRunGame {
     ctx.fill();
 
     // Subtle top highlight for 3D elevation
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+    const topAlpha = isGlow ? (0.28 + 0.08 * glowPulse) : 0.22;
+    ctx.fillStyle = `rgba(255, 255, 255, ${topAlpha})`;
     ctx.beginPath();
     ctx.roundRect(rx + 1, ry + 1, innerSize - 2, innerSize * 0.35, [r - 1, r - 1, 2, 2]);
     ctx.fill();
 
     // Subtle bottom shadow inside block
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
     ctx.beginPath();
     ctx.roundRect(rx + 1, ry + innerSize * 0.75, innerSize - 2, innerSize * 0.25 - 1, [0, 0, r - 1, r - 1]);
     ctx.fill();
 
-    if (strokeColor) {
+    if (isGlow) {
+      // Soft, gentle inner sheen
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.10 + 0.08 * glowPulse})`;
+      ctx.beginPath();
+      ctx.roundRect(rx, ry, innerSize, innerSize, r);
+      ctx.fill();
+
+      // Clean, elegant border highlight
+      ctx.strokeStyle = `rgba(255, 255, 255, ${0.55 + 0.20 * glowPulse})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.roundRect(rx, ry, innerSize, innerSize, r);
+      ctx.stroke();
+    } else if (strokeColor) {
       ctx.strokeStyle = strokeColor;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -1766,7 +1996,7 @@ class GridRunGame {
     ctx.restore();
   }
 
-  // Render Mini Pieces in Tray Slots
+  // Render Mini Pieces in Tray Slots with Generous Adaptive Sizing
   renderTray() {
     if (!this.state || !this.state.tray) return;
 
@@ -1781,7 +2011,12 @@ class GridRunGame {
       const piece = slot.piece;
       const pieceW = piece.width;
       const pieceH = piece.height;
-      const blockSize = Math.min(sRect.width / 5, sRect.height / 5);
+
+      // Balanced sizing: a bit bigger than the original size, clean and well-proportioned
+      const availW = sRect.width * 0.82;
+      const availH = sRect.height * 0.80;
+      const fitBlock = Math.min(availW / pieceW, availH / pieceH);
+      const blockSize = Math.min(fitBlock, 23.5);
 
       const totalW = pieceW * blockSize;
       const totalH = pieceH * blockSize;
@@ -1793,6 +2028,61 @@ class GridRunGame {
         const y = startY + r * blockSize;
         this.drawCell(ctx, x, y, blockSize, piece.color);
       }
+    });
+  }
+
+  // Trigger Subtle Smoky Appearance Effect when Tray Regenerates
+  triggerTraySmokeSpawn() {
+    this.slotCanvases.forEach((canvas, slotIdx) => {
+      const slotEl = canvas.parentElement;
+      if (!slotEl) return;
+
+      setTimeout(() => {
+        // Trigger slot pop-in keyframe
+        slotEl.classList.remove('spawning');
+        void slotEl.offsetWidth; // Force CSS reflow
+        slotEl.classList.add('spawning');
+
+        // Spawn 5 gentle misty smoke puffs around the slot center
+        const puffCount = 5;
+        const rect = slotEl.getBoundingClientRect();
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+
+        for (let p = 0; p < puffCount; p++) {
+          const puff = document.createElement('div');
+          puff.className = 'tray-smoke-puff';
+          
+          const size = 30 + Math.random() * 24; // 30px to 54px
+          puff.style.width = `${size}px`;
+          puff.style.height = `${size}px`;
+
+          const angle = (p / puffCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+          const dist = 6 + Math.random() * 12;
+          const sx = centerX + Math.cos(angle) * dist;
+          const sy = centerY + Math.sin(angle) * dist;
+
+          const dx = Math.cos(angle) * (14 + Math.random() * 14);
+          const dy = - (12 + Math.random() * 16); // drifts softly upwards
+          const scale = 1.3 + Math.random() * 0.3;
+
+          puff.style.left = `${sx}px`;
+          puff.style.top = `${sy}px`;
+          puff.style.setProperty('--dx', `${dx}px`);
+          puff.style.setProperty('--dy', `${dy}px`);
+          puff.style.setProperty('--scale', `${scale}`);
+
+          slotEl.appendChild(puff);
+
+          setTimeout(() => {
+            if (puff.parentNode) puff.parentNode.removeChild(puff);
+          }, 520);
+        }
+
+        setTimeout(() => {
+          slotEl.classList.remove('spawning');
+        }, 500);
+      }, slotIdx * 65);
     });
   }
 }

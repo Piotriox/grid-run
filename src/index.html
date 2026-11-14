@@ -56,6 +56,28 @@
           <button id="btn-menu-settings" class="menu-settings-btn" aria-label="Settings">
             <span>Settings</span>
           </button>
+
+          <!-- Changelog Card -->
+          <div class="menu-changelog-card">
+            <div class="changelog-header">
+              <button id="btn-changelog-prev" class="changelog-nav-btn" aria-label="Previous Version" title="Previous Version">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="15 18 9 12 15 6"></polyline>
+                </svg>
+              </button>
+              <div class="changelog-title-wrap">
+                <span id="changelog-version" class="changelog-version-title">Version 1.1.0</span>
+              </div>
+              <button id="btn-changelog-next" class="changelog-nav-btn" aria-label="Next Version" title="Next Version">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="9 18 15 12 9 6"></polyline>
+                </svg>
+              </button>
+            </div>
+            <div id="changelog-list" class="changelog-items-list">
+              <!-- Dynamically populated by JS -->
+            </div>
+          </div>
         </div>
 
         <div class="menu-footer">
@@ -154,16 +176,6 @@
             <path d="M16 21h5v-5"></path>
           </svg>
         </button>
-      </div>
-
-      <div class="header-center-brand">
-        <svg class="brand-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="7" height="7" rx="1.5"></rect>
-          <rect x="14" y="3" width="7" height="7" rx="1.5"></rect>
-          <rect x="14" y="14" width="7" height="7" rx="1.5"></rect>
-          <rect x="3" y="14" width="7" height="7" rx="1.5"></rect>
-        </svg>
-        <span class="grid-run-title">Grid Run</span>
       </div>
 
       <div class="header-right">

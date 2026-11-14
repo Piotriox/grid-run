@@ -189,6 +189,17 @@ pub fn get_piece_catalog() -> Vec<PieceTemplate> {
         // 2-blocks: Diagonal 2-Dots in 2x2 area
         PieceTemplate::new(36, "Diag2_Slash", 2, 2, vec![(0, 1), (1, 0)], "#F59E0B"),
         PieceTemplate::new(37, "Diag2_Backslash", 2, 2, vec![(0, 0), (1, 1)], "#F59E0B"),
+
+        // 6-blocks: Rectangles (Horizontal 3x2 and Vertical 2x3)
+        PieceTemplate::new(38, "Rect3x2H", 3, 2, vec![
+            (0, 0), (0, 1), (0, 2),
+            (1, 0), (1, 1), (1, 2)
+        ], "#EC4899"),
+        PieceTemplate::new(39, "Rect2x3V", 2, 3, vec![
+            (0, 0), (0, 1),
+            (1, 0), (1, 1),
+            (2, 0), (2, 1)
+        ], "#EC4899"),
     ]
 }
 
