@@ -20,13 +20,14 @@ class SoundEngine {
     this.musicGain = null;
     this.sfxGain = null;
 
-    // Load saved 10-level settings (defaults: Music=8, SFX=8)
-    this.musicLevel = parseInt(localStorage.getItem('gridrun_music_level') ?? '8', 10);
-    this.sfxLevel = parseInt(localStorage.getItem('gridrun_sfx_level') ?? '8', 10);
+    // Load saved 10-level settings (defaults: Music=10, SFX=10)
+    this.musicLevel = parseInt(localStorage.getItem('gridrun_music_level') ?? '10', 10);
+    this.sfxLevel = parseInt(localStorage.getItem('gridrun_sfx_level') ?? '10', 10);
 
     this.isPlayingMusic = false;
     this.musicTimer = null;
     this.chordStep = 0;
+    this.isBackgrounded = false;
   }
 
   init() {
@@ -36,16 +37,16 @@ class SoundEngine {
         this.ctx = new AudioCtx();
 
         this.sfxGain = this.ctx.createGain();
-        this.sfxGain.gain.setValueAtTime(this.sfxLevel / 10, this.ctx.currentTime);
+        this.sfxGain.gain.setValueAtTime((this.sfxLevel / 10) * 1.5, this.ctx.currentTime);
         this.sfxGain.connect(this.ctx.destination);
 
         this.musicGain = this.ctx.createGain();
-        this.musicGain.gain.setValueAtTime((this.musicLevel / 10) * 0.32, this.ctx.currentTime);
+        this.musicGain.gain.setValueAtTime((this.musicLevel / 10) * 0.70, this.ctx.currentTime);
         this.musicGain.connect(this.ctx.destination);
       }
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+    if (this.ctx && this.ctx.state === 'suspended' && !this.isBackgrounded) {
+      this.ctx.resume().catch(() => {});
     }
   }
 
@@ -54,7 +55,7 @@ class SoundEngine {
     localStorage.setItem('gridrun_music_level', this.musicLevel.toString());
     this.init();
     if (this.musicGain && this.ctx) {
-      this.musicGain.gain.setTargetAtTime((this.musicLevel / 10) * 0.32, this.ctx.currentTime, 0.05);
+      this.musicGain.gain.setTargetAtTime((this.musicLevel / 10) * 0.70, this.ctx.currentTime, 0.05);
     }
     if (!this.isPlayingMusic && this.musicLevel > 0) {
       this.startLofiMusic();
@@ -66,13 +67,13 @@ class SoundEngine {
     localStorage.setItem('gridrun_sfx_level', this.sfxLevel.toString());
     this.init();
     if (this.sfxGain && this.ctx) {
-      this.sfxGain.gain.setTargetAtTime(this.sfxLevel / 10, this.ctx.currentTime, 0.05);
+      this.sfxGain.gain.setTargetAtTime((this.sfxLevel / 10) * 1.5, this.ctx.currentTime, 0.05);
     }
   }
 
   // Soft, velvety, game-like bubble pop (warm lowpass filtered sine drop)
   playSoftPop() {
-    if (this.sfxLevel === 0) return;
+    if (this.sfxLevel === 0 || this.isBackgrounded) return;
     try {
       this.init();
       if (!this.ctx) return;
@@ -84,14 +85,14 @@ class SoundEngine {
 
       // Warm lowpass filter to remove harsh edge and give a rounded tactile pop
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(1400, now);
+      filter.frequency.setValueAtTime(2200, now);
 
       osc.type = 'sine';
-      // Softer, rounder pitch drop: 440Hz -> 260Hz
+      // Softer, rounder pitch drop: 440Hz -> 250Hz
       osc.frequency.setValueAtTime(440, now);
       osc.frequency.exponentialRampToValueAtTime(250, now + 0.065);
 
-      gain.gain.setValueAtTime(0.24, now);
+      gain.gain.setValueAtTime(0.70, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.065);
 
       osc.connect(filter);
@@ -107,7 +108,7 @@ class SoundEngine {
 
   // Game-like line clear explosion sound (playful, arcade, juicy punch + ascending chime burst)
   playLineClearExplosion(linesCleared = 1, comboCount = 1) {
-    if (this.sfxLevel === 0) return;
+    if (this.sfxLevel === 0 || this.isBackgrounded) return;
     try {
       this.init();
       if (!this.ctx) return;
@@ -121,7 +122,7 @@ class SoundEngine {
       subOsc.frequency.setValueAtTime(220, now);
       subOsc.frequency.exponentialRampToValueAtTime(55, now + 0.16);
 
-      subGain.gain.setValueAtTime(0.38, now);
+      subGain.gain.setValueAtTime(0.85, now);
       subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
 
       subOsc.connect(subGain);
@@ -152,7 +153,7 @@ class SoundEngine {
         filter.Q.setValueAtTime(3.0, noteTime);
 
         noteGain.gain.setValueAtTime(0.0001, noteTime);
-        noteGain.gain.linearRampToValueAtTime(0.28, noteTime + 0.015);
+        noteGain.gain.linearRampToValueAtTime(0.65, noteTime + 0.015);
         noteGain.gain.exponentialRampToValueAtTime(0.0001, noteTime + 0.22);
 
         noteOsc.connect(filter);
@@ -180,7 +181,7 @@ class SoundEngine {
       noiseFilter.Q.setValueAtTime(1.5, now);
 
       const noiseGain = this.ctx.createGain();
-      noiseGain.gain.setValueAtTime(0.22, now);
+      noiseGain.gain.setValueAtTime(0.50, now);
       noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
 
       whiteNoise.connect(noiseFilter);
@@ -196,7 +197,7 @@ class SoundEngine {
 
   // Crisp pleasant chime ding when score energy is absorbed into the SCORE display
   playScoreAbsorb() {
-    if (this.sfxLevel === 0) return;
+    if (this.sfxLevel === 0 || this.isBackgrounded) return;
     try {
       this.init();
       if (!this.ctx) return;
@@ -208,7 +209,7 @@ class SoundEngine {
       osc.frequency.setValueAtTime(880, now); // A5
       osc.frequency.exponentialRampToValueAtTime(1320, now + 0.08);
 
-      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.setValueAtTime(0.60, now);
       gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
 
       osc.connect(gain);
@@ -221,7 +222,7 @@ class SoundEngine {
 
   // Gentle, mellow Game Over dissolve sound (connected to sfxGain)
   playGameOverCrumble() {
-    if (this.sfxLevel === 0) return;
+    if (this.sfxLevel === 0 || this.isBackgrounded) return;
     try {
       this.init();
       if (!this.ctx) return;
@@ -235,14 +236,14 @@ class SoundEngine {
 
         const t = now + idx * 0.11;
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(550, t);
+        filter.frequency.setValueAtTime(800, t);
 
         osc.type = 'triangle';
         osc.frequency.setValueAtTime(freq, t);
         osc.frequency.exponentialRampToValueAtTime(freq * 0.65, t + 0.35);
 
         gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.linearRampToValueAtTime(0.2, t + 0.04);
+        gain.gain.linearRampToValueAtTime(0.55, t + 0.04);
         gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
 
         osc.connect(filter);
@@ -285,7 +286,7 @@ class SoundEngine {
 
         // Warm tape-like filter
         filter.type = 'lowpass';
-        filter.frequency.setValueAtTime(650 + i * 80, now);
+        filter.frequency.setValueAtTime(850 + i * 100, now);
 
         // Sine/Triangle warm Rhodes feel
         osc.type = i === 0 ? 'sine' : 'triangle';
@@ -294,7 +295,7 @@ class SoundEngine {
         // Soft gentle attack, long soothing decay
         const noteTime = now + i * 0.06;
         noteGain.gain.setValueAtTime(0.0001, noteTime);
-        noteGain.gain.linearRampToValueAtTime(0.18, noteTime + 0.14);
+        noteGain.gain.linearRampToValueAtTime(0.40, noteTime + 0.14);
         noteGain.gain.exponentialRampToValueAtTime(0.0001, noteTime + duration);
 
         osc.connect(filter);
@@ -318,12 +319,48 @@ class SoundEngine {
       this.musicTimer = null;
     }
   }
+
+  // Seamless background pause: instantly cuts off audio hardware & stops battery drain
+  pause() {
+    this.isBackgrounded = true;
+    if (this.musicTimer) {
+      clearTimeout(this.musicTimer);
+      this.musicTimer = null;
+    }
+    if (this.ctx && this.ctx.state === 'running') {
+      this.ctx.suspend().catch(() => {});
+    }
+  }
+
+  // Restore audio when app returns to foreground
+  resume() {
+    this.isBackgrounded = false;
+    if (this.ctx && this.ctx.state === 'suspended') {
+      this.ctx.resume().catch(() => {});
+    }
+    if (this.isPlayingMusic && this.musicLevel > 0) {
+      this.isPlayingMusic = false;
+      this.startLofiMusic();
+    }
+  }
 }
 
 const soundEngine = new SoundEngine();
 
+// Automatically pause all game audio when app is minimized, locked, or backgrounded on Android/iOS/Desktop
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    soundEngine.pause();
+  } else {
+    soundEngine.resume();
+  }
+});
+window.addEventListener('pagehide', () => soundEngine.pause());
+window.addEventListener('pageshow', () => soundEngine.resume());
+
 // Global button pop sound trigger for every button click/tap
 window.addEventListener('pointerdown', (e) => {
+  if (soundEngine.isBackgrounded) return;
   soundEngine.init();
   if (!soundEngine.isPlayingMusic && soundEngine.musicLevel > 0) {
     soundEngine.startLofiMusic();

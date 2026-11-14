@@ -10,13 +10,40 @@ src-tauri/target/
 **/*.rs.bk
 *.pdb
 
-# Tauri v2 Android Builds
+# Tauri v2 Android Builds & Caches
 src-tauri/gen/android/.gradle/
-src-tauri/gen/android/app/build/
-src-tauri/gen/android/build/
-src-tauri/gen/android/local.properties
 src-tauri/gen/android/.idea/
+src-tauri/gen/android/.tauri/
+src-tauri/gen/android/.cxx/
+src-tauri/gen/android/.externalNativeBuild/
+src-tauri/gen/android/build/
+src-tauri/gen/android/app/build/
+src-tauri/gen/android/captures/
 src-tauri/gen/android/*.iml
+src-tauri/gen/android/app/*.iml
+
+# Android Generated Native Libs & Build Properties
+src-tauri/gen/android/app/src/main/jniLibs/**/*.so
+src-tauri/gen/android/app/src/main/assets/tauri.conf.json
+src-tauri/gen/android/app/src/main/**/generated/
+src-tauri/gen/android/tauri.settings.gradle
+src-tauri/gen/android/app/tauri.build.gradle.kts
+src-tauri/gen/android/app/tauri.properties
+src-tauri/gen/android/app/proguard-tauri.pro
+
+# Android Keys, Keystores & Local Properties
+src-tauri/gen/android/local.properties
+*.jks
+*.keystore
+*.p12
+*.pepk
+key.properties
+keystore.properties
+
+# Android Output Binaries
+*.apk
+*.aab
+*.idsig
 
 # Logs
 npm-debug.log*
@@ -44,4 +71,3 @@ desktop.ini
 *.njsproj
 *.sln
 *.sw?
-
