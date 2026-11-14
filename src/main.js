@@ -974,9 +974,69 @@ class ParticleSystem {
   }
 }
 
+// Modular Theme Manager
+class ThemeManager {
+  constructor() {
+    this.themes = {
+      'modern-dark': {
+        id: 'modern-dark',
+        name: 'Modern Dark',
+        cellEmpty: '#121927',
+        cellEmptyBorder: '#1d283e'
+      },
+      'neon-arcade': {
+        id: 'neon-arcade',
+        name: 'Neon Cyber',
+        cellEmpty: '#160a2b',
+        cellEmptyBorder: '#2d1652'
+      },
+      'classic-blue': {
+        id: 'classic-blue',
+        name: 'Classic',
+        cellEmpty: '#121827',
+        cellEmptyBorder: '#1a2338'
+      }
+    };
+
+    const saved = localStorage.getItem('gridrun_theme');
+    this.currentThemeId = (saved && this.themes[saved]) ? saved : 'modern-dark';
+    this.apply(this.currentThemeId, false);
+  }
+
+  get active() {
+    return this.themes[this.currentThemeId] || this.themes['modern-dark'];
+  }
+
+  apply(themeId, save = true) {
+    if (!this.themes[themeId]) themeId = 'modern-dark';
+    this.currentThemeId = themeId;
+    document.documentElement.setAttribute('data-theme', themeId);
+    if (save) {
+      try {
+        localStorage.setItem('gridrun_theme', themeId);
+      } catch (e) {}
+    }
+    this.updateUI();
+  }
+
+  updateUI() {
+    const buttons = document.querySelectorAll('.theme-select-btn');
+    buttons.forEach(btn => {
+      if (btn.getAttribute('data-theme-id') === this.currentThemeId) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    });
+  }
+}
+
 // Main Game Controller
 class GridRunGame {
   constructor() {
+    // Theme Manager
+    this.themeManager = new ThemeManager();
+
     this.appContainer = document.getElementById('app');
     this.state = null;
     this.canvas = document.getElementById('game-canvas');
@@ -1042,6 +1102,7 @@ class GridRunGame {
           { tag: "feature", text: "Line-clear anticipation glow preview." },
           { tag: "feature", text: "Round-based combo streak progression." },
           { tag: "feature", text: "Misty smoke puff tray regeneration effect." },
+          { tag: "feature", text: "Modern Dark Arcade theme & settings selector." },
           { tag: "fix", text: "Gameplay HUD layout & spacing polished." },
           { tag: "fix", text: "Touch selection and blue highlights prevented." }
         ]
@@ -1067,6 +1128,7 @@ class GridRunGame {
 
   async init() {
     this.bindEvents();
+    this.themeManager.updateUI();
     this.renderChangelog();
     this.handleResize();
     window.addEventListener('resize', () => this.handleResize());
@@ -1319,6 +1381,20 @@ class GridRunGame {
       this.sliderSfx.addEventListener('input', handleSfxChange);
       this.sliderSfx.addEventListener('change', handleSfxChange);
     }
+
+    // Modular Theme Switcher Selection
+    const themeButtons = document.querySelectorAll('.theme-select-btn');
+    themeButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const targetTheme = btn.getAttribute('data-theme-id');
+        if (targetTheme && targetTheme !== this.themeManager.currentThemeId) {
+          this.themeManager.apply(targetTheme);
+          soundEngine.playSoftPop();
+          this.render();
+          this.renderTray();
+        }
+      });
+    });
 
     // Changelog Navigation
     if (this.btnChangelogPrev) {
@@ -1916,9 +1992,12 @@ class GridRunGame {
     const ry = y + pad;
     const r = 6;
 
+    const cellEmpty = this.themeManager ? this.themeManager.active.cellEmpty : '#121927';
+    const cellEmptyBorder = this.themeManager ? this.themeManager.active.cellEmptyBorder : '#1d283e';
+
     ctx.save();
     // Base dark recessed slot
-    ctx.fillStyle = '#121828';
+    ctx.fillStyle = cellEmpty;
     ctx.beginPath();
     ctx.roundRect(rx, ry, innerSize, innerSize, r);
     ctx.fill();
@@ -1930,7 +2009,7 @@ class GridRunGame {
     ctx.fill();
 
     // Sleek border outline
-    ctx.strokeStyle = '#1a2338';
+    ctx.strokeStyle = cellEmptyBorder;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.roundRect(rx, ry, innerSize, innerSize, r);
