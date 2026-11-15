@@ -826,6 +826,16 @@ class ParticleSystem {
     this.rings = [];
     this.fallingBlocks = [];
     this.dpr = 1;
+    this.needsClear = false;
+  }
+
+  hasActiveParticles() {
+    return this.rings.length > 0 || this.particles.length > 0 || this.fallingBlocks.length > 0;
+  }
+
+  clear() {
+    this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    this.needsClear = false;
   }
 
   resize(w, h, dpr) {
@@ -833,10 +843,12 @@ class ParticleSystem {
     this.canvas.height = h * dpr;
     this.ctx.scale(dpr, dpr);
     this.dpr = dpr;
+    this.needsClear = false;
   }
 
   // Physics Block Crumble: all placed blocks tumble downwards with gravity & rotation on Game Over
   spawnFallingBlocks(cells, cellSize) {
+    this.needsClear = true;
     const pad = 2;
     for (const { r, c, color } of cells) {
       const bx = c * cellSize + pad;
@@ -861,6 +873,7 @@ class ParticleSystem {
   }
 
   spawnLineClear(cells, cellSize) {
+    this.needsClear = true;
     for (const { r, c, color } of cells) {
       const cx = (c + 0.5) * cellSize;
       const cy = (r + 0.5) * cellSize;
@@ -896,6 +909,13 @@ class ParticleSystem {
   }
 
   updateAndRender() {
+    if (!this.hasActiveParticles()) {
+      if (this.needsClear) {
+        this.clear();
+      }
+      return;
+    }
+    this.needsClear = true;
     this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
     // Render expanding shockwave rings
@@ -1123,7 +1143,27 @@ class GridRunGame {
     // Drag State
     this.activeDrag = null;
 
+    // Performance Optimization: Cached Layout Rects, Zero-Allocation Buffers & Dirty Flag
+    this.boardRect = null;
+    this.appRect = null;
+    this.isBoardDirty = true;
+    this.tempRowMasks = new Uint8Array(8);
+    this.previewClears = {
+      rows: [],
+      cols: [],
+      explodingCells: new Set()
+    };
+
     this.init();
+  }
+
+  updateCachedRects() {
+    if (this.boardWrapper) {
+      this.boardRect = this.boardWrapper.getBoundingClientRect();
+    }
+    if (this.appContainer) {
+      this.appRect = this.appContainer.getBoundingClientRect();
+    }
   }
 
   async init() {
@@ -1131,15 +1171,33 @@ class GridRunGame {
     this.themeManager.updateUI();
     this.renderChangelog();
     this.handleResize();
-    window.addEventListener('resize', () => this.handleResize());
+    this.updateCachedRects();
+    window.addEventListener('resize', () => {
+      this.handleResize();
+      this.updateCachedRects();
+    });
 
-    // Start FX loop
+    // Start Optimized On-Demand FX & Render loop
     const loop = () => {
-      this.fx.updateAndRender();
-      this.render();
-      if (this.activeDrag) {
-        this.renderDragPiece();
+      if (this.fx.hasActiveParticles()) {
+        this.fx.updateAndRender();
+      } else if (this.fx.needsClear) {
+        this.fx.clear();
       }
+
+      // Board only renders when state changed (dirty) or dragging over board with line anticipation glow
+      const isDraggingOverBoard = Boolean(this.activeDrag && this.activeDrag.targetCol !== null && this.activeDrag.targetRow !== null);
+      if (this.isBoardDirty || isDraggingOverBoard) {
+        this.render();
+        this.isBoardDirty = false;
+      }
+
+      // Dragged piece only renders when pointer moved
+      if (this.activeDrag && this.activeDrag.isDirty) {
+        this.renderDragPiece();
+        this.activeDrag.isDirty = false;
+      }
+
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
@@ -1302,8 +1360,9 @@ class GridRunGame {
   }
 
   handleResize() {
-    const rect = this.boardWrapper.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
+    this.updateCachedRects();
+    const rect = this.boardRect || this.boardWrapper.getBoundingClientRect();
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.0);
     this.gridPixelSize = rect.width;
     this.cellSize = this.gridPixelSize / 8;
 
@@ -1315,7 +1374,7 @@ class GridRunGame {
     this.fx.resize(rect.width, rect.height, dpr);
 
     // Resize full drag canvas
-    const appRect = this.appContainer.getBoundingClientRect();
+    const appRect = this.appRect || this.appContainer.getBoundingClientRect();
     this.dragCanvas.width = appRect.width * dpr;
     this.dragCanvas.height = appRect.height * dpr;
     this.dragCtx.resetTransform();
@@ -1332,9 +1391,11 @@ class GridRunGame {
       this.slotCtxs[idx].scale(dpr, dpr);
     });
 
+    this.isBoardDirty = true;
     this.render();
     this.renderTray();
     if (this.activeDrag) {
+      this.activeDrag.isDirty = true;
       this.renderDragPiece();
     }
   }
@@ -1390,6 +1451,7 @@ class GridRunGame {
         if (targetTheme && targetTheme !== this.themeManager.currentThemeId) {
           this.themeManager.apply(targetTheme);
           soundEngine.playSoftPop();
+          this.isBoardDirty = true;
           this.render();
           this.renderTray();
         }
@@ -1463,6 +1525,9 @@ class GridRunGame {
     e.preventDefault();
     slotEl.classList.add('dragging');
 
+    // Cache rects on drag initiation to prevent forced reflow on pointermove
+    this.updateCachedRects();
+
     const isTouch = e.pointerType === 'touch';
     const touchLiftY = isTouch ? 70 : 0;
 
@@ -1475,9 +1540,11 @@ class GridRunGame {
       targetCol: null,
       targetRow: null,
       isValid: false,
-      previewClears: null
+      previewClears: null,
+      isDirty: true
     };
 
+    this.isBoardDirty = true;
     this.renderDragPiece();
   }
 
@@ -1486,9 +1553,10 @@ class GridRunGame {
     e.preventDefault();
     this.activeDrag.clientX = e.clientX;
     this.activeDrag.clientY = e.clientY - this.activeDrag.touchLiftY;
+    this.activeDrag.isDirty = true;
 
-    // Project coordinates onto the 8x8 Board
-    const boardRect = this.boardWrapper.getBoundingClientRect();
+    // Use pre-cached board rectangle: ZERO DOM layout recalculation during touch drag
+    const boardRect = this.boardRect || this.boardWrapper.getBoundingClientRect();
     
     const piece = this.activeDrag.piece;
     const halfW = (piece.width * this.cellSize) / 2;
@@ -1503,24 +1571,26 @@ class GridRunGame {
     const col = Math.floor(relX / this.cellSize);
     const row = Math.floor(relY / this.cellSize);
 
-    if (row >= 0 && row + piece.height <= 8 &&
-        col >= 0 && col + piece.width <= 8) {
-      this.activeDrag.targetCol = col;
-      this.activeDrag.targetRow = row;
-      this.activeDrag.isValid = this.checkPlacementValidity(piece, row, col);
-      if (this.activeDrag.isValid) {
-        this.activeDrag.previewClears = this.getPotentialLineClears(piece, row, col);
+    // Only re-validate and calculate clears when the hovered grid cell (col, row) actually changes!
+    if (col !== this.activeDrag.targetCol || row !== this.activeDrag.targetRow) {
+      if (row >= 0 && row + piece.height <= 8 &&
+          col >= 0 && col + piece.width <= 8) {
+        this.activeDrag.targetCol = col;
+        this.activeDrag.targetRow = row;
+        this.activeDrag.isValid = this.checkPlacementValidity(piece, row, col);
+        if (this.activeDrag.isValid) {
+          this.activeDrag.previewClears = this.getPotentialLineClears(piece, row, col);
+        } else {
+          this.activeDrag.previewClears = null;
+        }
       } else {
+        this.activeDrag.targetCol = null;
+        this.activeDrag.targetRow = null;
+        this.activeDrag.isValid = false;
         this.activeDrag.previewClears = null;
       }
-    } else {
-      this.activeDrag.targetCol = null;
-      this.activeDrag.targetRow = null;
-      this.activeDrag.isValid = false;
-      this.activeDrag.previewClears = null;
+      this.isBoardDirty = true;
     }
-
-    this.renderDragPiece();
   }
 
   checkPlacementValidity(piece, row, col) {
@@ -1535,66 +1605,65 @@ class GridRunGame {
     return true;
   }
 
-  // Pre-calculate line clears that would be triggered if the piece is placed
+  // Pre-calculate line clears with zero heap allocations (reusing row masks & packed integer cell keys)
   getPotentialLineClears(piece, originRow, originCol) {
+    const cache = this.previewClears;
+    cache.rows.length = 0;
+    cache.cols.length = 0;
+    cache.explodingCells.clear();
+
     if (!this.state || !this.state.grid_array) {
-      return { rows: [], cols: [], explodingCells: new Set() };
+      return cache;
     }
 
-    // Build virtual 8x8 grid
-    const virtualGrid = Array.from({ length: 8 }, (_, r) =>
-      Array.from({ length: 8 }, (_, c) => Boolean(this.state.grid_array[r][c]))
-    );
+    // Initialize 8 row masks (each 0..255)
+    for (let r = 0; r < 8; r++) {
+      let mask = 0;
+      const rowArr = this.state.grid_array[r];
+      for (let c = 0; c < 8; c++) {
+        if (rowArr[c]) mask |= (1 << c);
+      }
+      this.tempRowMasks[r] = mask;
+    }
 
-    // Overlay piece onto virtual grid
+    // Overlay piece cells onto tempRowMasks
     for (const [r, c] of piece.cells) {
       const vr = originRow + r;
       const vc = originCol + c;
       if (vr < 8 && vc < 8) {
-        virtualGrid[vr][vc] = true;
+        this.tempRowMasks[vr] |= (1 << vc);
       }
     }
 
-    const clearedRows = [];
-    const clearedCols = [];
-
-    // Check complete rows
+    // Check full rows (mask === 0xFF = 255)
     for (let r = 0; r < 8; r++) {
-      let isRowFull = true;
-      for (let c = 0; c < 8; c++) {
-        if (!virtualGrid[r][c]) {
-          isRowFull = false;
-          break;
+      if (this.tempRowMasks[r] === 255) {
+        cache.rows.push(r);
+        for (let c = 0; c < 8; c++) {
+          cache.explodingCells.add(r * 8 + c);
         }
       }
-      if (isRowFull) clearedRows.push(r);
     }
 
-    // Check complete columns
+    // Check full columns
     for (let c = 0; c < 8; c++) {
-      let isColFull = true;
+      const bit = 1 << c;
+      let colFull = true;
       for (let r = 0; r < 8; r++) {
-        if (!virtualGrid[r][c]) {
-          isColFull = false;
+        if ((this.tempRowMasks[r] & bit) === 0) {
+          colFull = false;
           break;
         }
       }
-      if (isColFull) clearedCols.push(c);
+      if (colFull) {
+        cache.cols.push(c);
+        for (let r = 0; r < 8; r++) {
+          cache.explodingCells.add(r * 8 + c);
+        }
+      }
     }
 
-    const explodingCells = new Set();
-    clearedRows.forEach(r => {
-      for (let c = 0; c < 8; c++) explodingCells.add(`${r},${c}`);
-    });
-    clearedCols.forEach(c => {
-      for (let r = 0; r < 8; r++) explodingCells.add(`${r},${c}`);
-    });
-
-    return {
-      rows: clearedRows,
-      cols: clearedCols,
-      explodingCells
-    };
+    return cache;
   }
 
   // Draw the dragged piece smoothly across the entire screen on dragCanvas
@@ -1603,7 +1672,7 @@ class GridRunGame {
     if (!this.activeDrag) return;
 
     const { piece, clientX, clientY } = this.activeDrag;
-    const appRect = this.appContainer.getBoundingClientRect();
+    const appRect = this.appRect || this.appContainer.getBoundingClientRect();
     
     // Convert client coords to app container local coords
     const localX = clientX - appRect.left;
@@ -1617,9 +1686,9 @@ class GridRunGame {
 
     const ctx = this.dragCtx;
     ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-    ctx.shadowBlur = 14;
-    ctx.shadowOffsetY = 6;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+    ctx.shadowBlur = 8;
+    ctx.shadowOffsetY = 4;
 
     for (const [r, c] of piece.cells) {
       const x = startX + c * cs;
@@ -1747,12 +1816,12 @@ class GridRunGame {
       return;
     }
 
-    const appRect = this.appContainer.getBoundingClientRect();
+    const appRect = this.appRect || this.appContainer.getBoundingClientRect();
     const scoreRect = this.scoreEl.getBoundingClientRect();
     const targetX = scoreRect.left + scoreRect.width / 2 - appRect.left;
     const targetY = scoreRect.top + scoreRect.height / 2 - appRect.top;
 
-    const boardRect = this.canvas.getBoundingClientRect();
+    const boardRect = this.boardRect || this.canvas.getBoundingClientRect();
 
     // Calculate center of cleared explosion for floating score text
     let avgX = 0;
@@ -1924,6 +1993,7 @@ class GridRunGame {
       this.comboBadge.classList.add('hidden');
     }
 
+    this.isBoardDirty = true;
     this.render();
     this.renderTray();
   }
@@ -1942,6 +2012,7 @@ class GridRunGame {
 
     // Draw background empty slots & placed blocks in their authentic colors
     for (let r = 0; r < 8; r++) {
+      const rOffset = r * 8;
       for (let c = 0; c < 8; c++) {
         const x = c * cs;
         const y = r * cs;
@@ -1949,7 +2020,7 @@ class GridRunGame {
 
         if (isOccupied) {
           const cellColor = (this.gridColors[r] && this.gridColors[r][c]) || '#3B82F6';
-          const isExploding = hasClears && previewClears.explodingCells.has(`${r},${c}`);
+          const isExploding = hasClears && previewClears.explodingCells.has(rOffset + c);
           this.drawCell(ctx, x, y, cs, cellColor, null, isExploding, glowPulse);
         } else {
           this.drawEmptyCell(ctx, x, y, cs);
@@ -1968,7 +2039,7 @@ class GridRunGame {
         const tc = targetCol + c;
 
         if (isValid) {
-          const isExploding = hasClears && previewClears.explodingCells.has(`${tr},${tc}`);
+          const isExploding = hasClears && previewClears.explodingCells.has(tr * 8 + tc);
           if (isExploding) {
             // Subtle glowing ghost block matching the exploding line
             const ghostFill = hexToRgba(piece.color, 0.50 + 0.10 * glowPulse);
@@ -2039,9 +2110,8 @@ class GridRunGame {
     ctx.roundRect(rx, ry, innerSize, innerSize, r);
     ctx.fill();
 
-    // Subtle top highlight for 3D elevation
-    const topAlpha = isGlow ? (0.28 + 0.08 * glowPulse) : 0.22;
-    ctx.fillStyle = `rgba(255, 255, 255, ${topAlpha})`;
+    // Subtle top highlight for 3D elevation (Zero-allocation static styles)
+    ctx.fillStyle = isGlow ? 'rgba(255, 255, 255, 0.32)' : 'rgba(255, 255, 255, 0.22)';
     ctx.beginPath();
     ctx.roundRect(rx + 1, ry + 1, innerSize - 2, innerSize * 0.35, [r - 1, r - 1, 2, 2]);
     ctx.fill();
@@ -2054,13 +2124,13 @@ class GridRunGame {
 
     if (isGlow) {
       // Soft, gentle inner sheen
-      ctx.fillStyle = `rgba(255, 255, 255, ${0.10 + 0.08 * glowPulse})`;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
       ctx.beginPath();
       ctx.roundRect(rx, ry, innerSize, innerSize, r);
       ctx.fill();
 
       // Clean, elegant border highlight
-      ctx.strokeStyle = `rgba(255, 255, 255, ${0.55 + 0.20 * glowPulse})`;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.roundRect(rx, ry, innerSize, innerSize, r);
